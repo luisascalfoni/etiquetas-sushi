@@ -308,6 +308,37 @@
   }
   #label .lbl-footer .left b{display:block; font-size:12px;}
 
+  /* ---------- COMBO (busca de combinado) ---------- */
+  .combo-wrap{position:relative;}
+  .combo-list{
+    display:none;
+    position:absolute;
+    top:calc(100% + 4px);
+    left:0;
+    right:0;
+    background:#fff;
+    border:1.5px solid var(--border);
+    border-radius:10px;
+    max-height:260px;
+    overflow-y:auto;
+    z-index:50;
+    box-shadow:0 4px 14px rgba(0,0,0,0.12);
+  }
+  .combo-list.show{display:block;}
+  .combo-item{
+    padding:13px 14px;
+    font-size:16px;
+    border-bottom:1px solid var(--border);
+    cursor:pointer;
+  }
+  .combo-item:last-child{border-bottom:none;}
+  .combo-item:active{background:#f2f2f2;}
+  .combo-empty{
+    padding:13px 14px;
+    font-size:14px;
+    color:var(--muted);
+  }
+
   /* ---------- MODAL ---------- */
   .modal-overlay{
     display:none;
@@ -378,8 +409,12 @@
     <div class="card">
       <h2>Dados do combinado</h2>
 
-      <label for="in-combinado">Combinado</label>
-      <select id="in-combinado"></select>
+      <label for="in-combinado-search">Combinado</label>
+      <div class="combo-wrap">
+        <input type="text" id="in-combinado-search" placeholder="Buscar combinado..." autocomplete="off">
+        <input type="hidden" id="in-combinado">
+        <div class="combo-list" id="in-combinado-list"></div>
+      </div>
 
       <div id="tamanho-wrap" style="display:none;">
         <label for="in-tamanho" id="lbl-tamanho">Tamanho</label>
@@ -755,23 +790,72 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   const inValidade = document.getElementById("in-validade");
   const validadeHint = document.getElementById("validade-hint");
 
+  const comboSearch = document.getElementById("in-combinado-search");
+  const comboList = document.getElementById("in-combinado-list");
+
+  function sortedCombinados(){
+    return state.combinados.slice().sort((a, b)=>a.nome.localeCompare(b.nome, "pt-BR"));
+  }
+
+  // Mantém a seleção atual (se o combinado ainda existir) ou cai no primeiro
+  // em ordem alfabética — chamada sempre que a lista de combinados muda.
   function populateCombinadoSelect(){
     const prevValue = selCombinado.value;
-    selCombinado.innerHTML = "";
-    if(state.combinados.length === 0){
-      selCombinado.innerHTML = `<option value="">Nenhum combinado cadastrado</option>`;
+    const sorted = sortedCombinados();
+    if(sorted.length === 0){
+      selCombinado.value = "";
+      comboSearch.value = "";
+      comboSearch.placeholder = "Nenhum combinado cadastrado";
       return;
     }
-    state.combinados.forEach(c=>{
-      const opt = document.createElement("option");
-      opt.value = c.id;
-      opt.textContent = c.nome;
-      selCombinado.appendChild(opt);
-    });
-    if(state.combinados.some(c=>c.id === prevValue)){
-      selCombinado.value = prevValue;
-    }
+    comboSearch.placeholder = "Buscar combinado...";
+    const chosen = sorted.find(c=>c.id === prevValue) || sorted[0];
+    selCombinado.value = chosen.id;
+    comboSearch.value = chosen.nome;
   }
+
+  function renderComboList(filterText){
+    const q = (filterText || "").trim().toLowerCase();
+    const items = sortedCombinados().filter(c=>!q || c.nome.toLowerCase().includes(q));
+    if(items.length === 0){
+      comboList.innerHTML = `<div class="combo-empty">Nenhum combinado encontrado</div>`;
+    } else {
+      comboList.innerHTML = items.map(c=>`<div class="combo-item" data-id="${c.id}">${escapeHtml(c.nome)}</div>`).join("");
+      comboList.querySelectorAll(".combo-item").forEach(el=>{
+        el.addEventListener("mousedown", (e)=>{
+          e.preventDefault();
+          selectCombinadoById(el.dataset.id);
+        });
+      });
+    }
+    comboList.classList.add("show");
+  }
+
+  function hideComboList(){
+    comboList.classList.remove("show");
+  }
+
+  function selectCombinadoById(id){
+    const c = state.combinados.find(x=>x.id === id);
+    if(!c) return;
+    selCombinado.value = id;
+    comboSearch.value = c.nome;
+    hideComboList();
+    onCombinadoChange();
+  }
+
+  comboSearch.addEventListener("focus", ()=>{
+    comboSearch.select();
+    renderComboList("");
+  });
+  comboSearch.addEventListener("input", ()=>renderComboList(comboSearch.value));
+  comboSearch.addEventListener("blur", ()=>{
+    setTimeout(()=>{
+      hideComboList();
+      const c = currentCombinado();
+      comboSearch.value = c ? c.nome : "";
+    }, 150);
+  });
 
   function populateSushimanSelect(){
     const prevValue = selSushiman.value;
@@ -852,7 +936,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     validadeHint.textContent = c ? `Validade padrão deste combinado: ${dias} dia(s) após manipulação.` : "";
   }
 
-  selCombinado.addEventListener("change", onCombinadoChange);
   inManip.addEventListener("change", ()=>{ recalcValidade(); renderPreview(); });
   [inPecas, inConsv, inValidade, selSushiman].forEach(el=>{
     el.addEventListener("input", renderPreview);
@@ -942,10 +1025,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     populateCombinadoSelect();
     populateSushimanSelect();
     inManip.value = todayISO();
-    if(state.combinados.length){
-      selCombinado.value = state.combinados[0].id;
-      populateTamanhoSelect(state.combinados[0]);
-    }
+    populateTamanhoSelect(currentCombinado());
     recalcValidade();
     renderPreview();
   }

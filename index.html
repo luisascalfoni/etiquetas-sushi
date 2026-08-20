@@ -558,7 +558,16 @@
 
     <div class="card">
       <h2>Tamanho da etiqueta</h2>
+      <label for="cfg-label-preset">Modelo de etiqueta</label>
       <div class="row2">
+        <div style="flex:2;">
+          <select id="cfg-label-preset"></select>
+        </div>
+        <div style="flex:0 0 auto;">
+          <button class="icon-btn del" id="cfg-preset-delete" style="width:100%; height:100%;">🗑️</button>
+        </div>
+      </div>
+      <div class="row2" style="margin-top:14px;">
         <div>
           <label>Largura (mm)</label>
           <input type="number" id="cfg-w" min="20">
@@ -568,8 +577,11 @@
           <input type="number" id="cfg-h" min="20">
         </div>
       </div>
-      <p class="hint">Ajuste conforme o rolo de etiqueta da sua impressora. Padrão: 60mm x 40mm.</p>
-      <button class="btn btn-primary" id="cfg-save-size">Salvar tamanho</button>
+      <p class="hint">Ajuste conforme o rolo de etiqueta da sua impressora.</p>
+      <div class="row2">
+        <button class="btn btn-secondary" id="cfg-save-size">Salvar tamanho</button>
+        <button class="btn btn-primary" id="cfg-preset-save-new">+ Salvar como modelo</button>
+      </div>
     </div>
 
     <div class="card">
@@ -650,6 +662,10 @@ crc-32/crc32.js:
       { id: cryptoId(), nome: "SAORI", variantes: ["31"], validadeDias: 1 }
     ],
     sushimans: [],
+    labelPresets: [
+      { id: cryptoId(), nome: "60x40mm", w: 60, h: 40 },
+      { id: cryptoId(), nome: "50x30mm", w: 50, h: 30 }
+    ],
     config: {
       loja: "SAKURA SUSHI",
       cnpj: "",
@@ -1718,6 +1734,7 @@ crc-32/crc32.js:
     document.getElementById("cfg-extra").value = state.config.extra || "";
     document.getElementById("cfg-w").value = state.config.labelW;
     document.getElementById("cfg-h").value = state.config.labelH;
+    populateLabelPresetSelect();
     document.getElementById("cfg-sync-combinados").value = state.config.syncCombinadosUrl || "";
     document.getElementById("cfg-sync-sushimans").value = state.config.syncSushimansUrl || "";
     document.getElementById("cfg-sync-auto").checked = !!state.config.syncAuto;
@@ -1856,7 +1873,75 @@ crc-32/crc32.js:
     state.config.labelH = Number(document.getElementById("cfg-h").value) || 40;
     save();
     renderPreview();
+    populateLabelPresetSelect();
     toast("Tamanho da etiqueta salvo ✅");
+  });
+
+  // ---- modelos de etiqueta salvos (ex: 60x40mm, 50x30mm) ----
+  function populateLabelPresetSelect(){
+    const sel = document.getElementById("cfg-label-preset");
+    if(state.labelPresets.length === 0){
+      sel.innerHTML = `<option value="">Nenhum modelo salvo</option>`;
+      return;
+    }
+    sel.innerHTML = state.labelPresets.map(p=>
+      `<option value="${p.id}">${escapeHtml(p.nome)} (${p.w}x${p.h}mm)</option>`
+    ).join("");
+    const match = state.labelPresets.find(p=>p.w === state.config.labelW && p.h === state.config.labelH);
+    if(match) sel.value = match.id;
+  }
+
+  document.getElementById("cfg-label-preset").addEventListener("change", ()=>{
+    const p = state.labelPresets.find(x=>x.id === document.getElementById("cfg-label-preset").value);
+    if(!p) return;
+    document.getElementById("cfg-w").value = p.w;
+    document.getElementById("cfg-h").value = p.h;
+    state.config.labelW = p.w;
+    state.config.labelH = p.h;
+    save();
+    renderPreview();
+    toast(`Modelo "${p.nome}" aplicado ✅`);
+  });
+
+  document.getElementById("cfg-preset-save-new").addEventListener("click", ()=>{
+    const w = Number(document.getElementById("cfg-w").value) || 60;
+    const h = Number(document.getElementById("cfg-h").value) || 40;
+    openModal(`
+      <h3>Salvar modelo de etiqueta</h3>
+      <label>Nome do modelo</label>
+      <input type="text" id="modal-preset-nome" value="${w}x${h}mm">
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modal-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="modal-save">Salvar</button>
+      </div>
+    `);
+    document.getElementById("modal-cancel").addEventListener("click", closeModal);
+    document.getElementById("modal-save").addEventListener("click", ()=>{
+      const nome = document.getElementById("modal-preset-nome").value.trim() || `${w}x${h}mm`;
+      state.labelPresets.push({ id: cryptoId(), nome, w, h });
+      state.config.labelW = w;
+      state.config.labelH = h;
+      save();
+      closeModal();
+      populateLabelPresetSelect();
+      toast("Modelo salvo ✅");
+    });
+  });
+
+  document.getElementById("cfg-preset-delete").addEventListener("click", ()=>{
+    const sel = document.getElementById("cfg-label-preset");
+    const p = state.labelPresets.find(x=>x.id === sel.value);
+    if(!p) return;
+    if(state.labelPresets.length <= 1){
+      toast("Precisa deixar ao menos um modelo salvo.");
+      return;
+    }
+    confirmModal(`Excluir o modelo "${p.nome}"?`, "Excluir", ()=>{
+      state.labelPresets = state.labelPresets.filter(x=>x.id !== p.id);
+      save();
+      populateLabelPresetSelect();
+      toast("Modelo excluído.");
+    });
   });
 
   document.getElementById("cfg-export").addEventListener("click", ()=>{

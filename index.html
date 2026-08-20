@@ -1084,6 +1084,9 @@ crc-32/crc32.js:
     return Math.round(mm / 25.4 * 203);
   }
 
+  // Largura máxima do cabeçote de impressão da NIIMBOT B1, em pontos (203dpi).
+  const NIIMBOT_MAX_COLS = 384;
+
   // Quebra texto em linhas que cabem em maxWidth, sem desenhar (só mede).
   function computeWrappedLines(ctx, text, maxWidth){
     const words = text.split(" ");
@@ -1124,7 +1127,11 @@ crc-32/crc32.js:
 
     const wMm = cfg.labelW || 60;
     const hMm = cfg.labelH || 40;
-    const w = mmToPx(wMm);
+    // A NIIMBOT B1 tem um cabeçote de no máximo 384 pontos (≈48mm) de largura.
+    // Se a etiqueta configurada for mais larga que isso, limitamos aqui pra tudo
+    // (texto, borda) ficar dentro do que a impressora realmente consegue imprimir,
+    // em vez de estourar e cortar conteúdo.
+    const w = Math.min(mmToPx(wMm), NIIMBOT_MAX_COLS);
     const h = mmToPx(hMm);
 
     const canvas = document.createElement("canvas");
@@ -1248,10 +1255,10 @@ crc-32/crc32.js:
       canvas = flipped;
     }
 
-    // A biblioteca já faz a rotação de orientação sozinha ("left" = 90° no
-    // sentido horário) — sempre usar "left", nunca rotacionar o canvas para
-    // trocar largura por altura manualmente.
-    const encoded = niimbluelib.ImageEncoder.encodeCanvas(canvas, "left");
+    // "top" = sem rotação (largura da etiqueta = largura do cabeçote, altura =
+    // comprimento ao longo do rolo). É a orientação nativa da B1 — usar "left"
+    // aqui trocaria as duas, fazendo o conteúdo vazar para a etiqueta seguinte.
+    const encoded = niimbluelib.ImageEncoder.encodeCanvas(canvas, "top");
     const printTask = bleClient.abstraction.newPrintTask("B1", {
       totalPages: 1,
       density: 3,

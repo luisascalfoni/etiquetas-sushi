@@ -594,7 +594,7 @@
       </div>
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
         <input type="checkbox" id="cfg-ble-rotate" style="width:auto;">
-        <span style="font-weight:600; color:var(--text);">Girar etiqueta 90° (se sair errada na impressora)</span>
+        <span style="font-weight:600; color:var(--text);">Virar etiqueta de cabeça para baixo (se sair invertida na impressora)</span>
       </label>
     </div>
 
@@ -1234,17 +1234,23 @@ crc-32/crc32.js:
   async function printViaBluetooth(){
     let canvas = drawLabelCanvas();
 
+    // "Girar" vira a etiqueta de cabeça para baixo (180°) mantendo a mesma
+    // largura/altura. NÃO trocar largura por altura (rotação de 90°): isso
+    // ultrapassa o limite físico do cabeçote de impressão e corta a etiqueta.
     if(state.config.bleRotate){
-      const rotated = document.createElement("canvas");
-      rotated.width = canvas.height;
-      rotated.height = canvas.width;
-      const rctx = rotated.getContext("2d");
-      rctx.translate(rotated.width / 2, rotated.height / 2);
-      rctx.rotate(Math.PI / 2);
-      rctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-      canvas = rotated;
+      const flipped = document.createElement("canvas");
+      flipped.width = canvas.width;
+      flipped.height = canvas.height;
+      const fctx = flipped.getContext("2d");
+      fctx.translate(flipped.width, flipped.height);
+      fctx.rotate(Math.PI);
+      fctx.drawImage(canvas, 0, 0);
+      canvas = flipped;
     }
 
+    // A biblioteca já faz a rotação de orientação sozinha ("left" = 90° no
+    // sentido horário) — sempre usar "left", nunca rotacionar o canvas para
+    // trocar largura por altura manualmente.
     const encoded = niimbluelib.ImageEncoder.encodeCanvas(canvas, "left");
     const printTask = bleClient.abstraction.newPrintTask("B1", {
       totalPages: 1,

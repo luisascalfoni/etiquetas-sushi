@@ -1344,14 +1344,21 @@ crc-32/crc32.js:
       statusPollIntervalMs: 100,
       statusTimeoutMs: 8000
     });
-    try{
-      await printTask.printInit();
-      await printTask.printPage(encoded, qtd);
-      await printTask.waitForPageFinished();
-      await printTask.waitForFinished();
-    } finally {
-      await printTask.printEnd();
-    }
+    await printTask.printInit();
+    await printTask.printPage(encoded, qtd);
+    // A partir daqui o comando já foi enviado pra impressora — o resto (esperar
+    // terminar de imprimir de verdade e fechar a tarefa) continua em segundo
+    // plano, sem travar a confirmação na tela.
+    (async ()=>{
+      try{
+        await printTask.waitForPageFinished();
+        await printTask.waitForFinished();
+      }catch(e){
+        console.error("Erro aguardando a impressora terminar:", e);
+      }finally{
+        await printTask.printEnd();
+      }
+    })();
   }
 
   document.getElementById("btn-imprimir").addEventListener("click", async ()=>{

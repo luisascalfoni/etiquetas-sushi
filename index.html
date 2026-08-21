@@ -200,6 +200,28 @@
     text-align:center;
   }
   .toast.show{opacity:1;}
+  .print-confirm{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    background:var(--success);
+    color:#fff;
+    padding:18px 20px;
+    font-size:18px;
+    font-weight:800;
+    z-index:300;
+    transform:translateY(-100%);
+    transition:transform 0.3s ease;
+    text-align:center;
+  }
+  .print-confirm.show{transform:translateY(0);}
+  .print-confirm.error{background:var(--danger);}
+  .print-confirm .pc-icon{font-size:26px;}
   .hist-day-header{
     font-size:13px;
     font-weight:700;
@@ -618,6 +640,11 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="print-confirm" id="print-confirm">
+  <span class="pc-icon">✅</span>
+  <span class="pc-text">Etiqueta enviada com sucesso!</span>
+</div>
+
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal-box" id="modal-box"></div>
 </div>
@@ -741,6 +768,19 @@ crc-32/crc32.js:
     t.classList.add("show");
     clearTimeout(toast._timer);
     toast._timer = setTimeout(()=>t.classList.remove("show"), 2200);
+  }
+
+  // Confirmação grande e chamativa de que a etiqueta foi enviada (ou falhou),
+  // pra dar pra perceber de longe numa cozinha corrida.
+  function printConfirm(msg, isError){
+    const el = document.getElementById("print-confirm");
+    el.querySelector(".pc-text").textContent = msg;
+    el.querySelector(".pc-icon").textContent = isError ? "⚠️" : "✅";
+    el.classList.toggle("error", !!isError);
+    el.classList.add("show");
+    if(navigator.vibrate) navigator.vibrate(isError ? [80,60,80] : 60);
+    clearTimeout(printConfirm._timer);
+    printConfirm._timer = setTimeout(()=>el.classList.remove("show"), 2400);
   }
 
   // ---------- MODAL (substitui confirm()/prompt() nativos, que não funcionam
@@ -1342,11 +1382,11 @@ crc-32/crc32.js:
     if(bleClient && bleClient.isConnected()){
       try{
         await printViaBluetooth(qtd);
-        toast(`${qtd > 1 ? qtd + " etiquetas impressas" : "Etiqueta impressa"} ✅`);
+        printConfirm(qtd > 1 ? `${qtd} etiquetas enviadas com sucesso!` : "Etiqueta enviada com sucesso!");
         return;
       }catch(err){
         console.error(err);
-        toast("Erro na impressora Bluetooth — abrindo impressão normal.");
+        printConfirm("Falha ao enviar para a impressora — tentando impressão normal.", true);
       }
     }
 
@@ -1355,7 +1395,7 @@ crc-32/crc32.js:
   });
 
   window.addEventListener("afterprint", ()=>{
-    toast("Etiqueta registrada no histórico ✅");
+    printConfirm("Etiqueta enviada com sucesso!");
   });
 
   // dynamic style tag for label print size

@@ -252,7 +252,7 @@
     justify-content:center;
     padding:10px 0 4px;
   }
-  #label{
+  .lbl-box{
     background:#fff;
     color:#000;
     border:3px solid #000;
@@ -262,7 +262,7 @@
     width:100%;
     max-width:380px;
   }
-  #label .lbl-title{
+  .lbl-box .lbl-title{
     font-size:22px;
     font-weight:800;
     letter-spacing:0.5px;
@@ -271,7 +271,7 @@
     margin-bottom:8px;
     word-break:break-word;
   }
-  #label .lbl-consv{
+  .lbl-box .lbl-consv{
     font-size:15px;
     font-weight:800;
     letter-spacing:1px;
@@ -279,25 +279,25 @@
     padding-bottom:8px;
     margin-bottom:8px;
   }
-  #label .lbl-line{
+  .lbl-box .lbl-line{
     display:flex;
     justify-content:space-between;
     font-size:15px;
     font-weight:700;
     padding:2px 0;
   }
-  #label .lbl-dates{
+  .lbl-box .lbl-dates{
     border-bottom:2.5px solid #000;
     padding-bottom:8px;
     margin-bottom:8px;
   }
-  #label .lbl-resp{
+  .lbl-box .lbl-resp{
     font-size:15px;
     font-weight:800;
     padding-bottom:14px;
     margin-bottom:14px;
   }
-  #label .lbl-footer{
+  .lbl-box .lbl-footer{
     border-top:2.5px solid #000;
     padding-top:8px;
     font-size:11px;
@@ -306,7 +306,8 @@
     align-items:flex-end;
     gap:6px;
   }
-  #label .lbl-footer .left b{display:block; font-size:12px;}
+  .lbl-box .lbl-footer .left b{display:block; font-size:12px;}
+  #print-copies{display:none;}
 
   /* ---------- COMBO (busca de combinado) ---------- */
   .combo-wrap{position:relative;}
@@ -374,16 +375,21 @@
 
   @media print{
     body *{visibility:hidden;}
-    #label, #label *{visibility:visible;}
-    #label{
+    #print-copies, #print-copies *{visibility:visible;}
+    #print-copies{
+      display:block;
       position:absolute;
       top:0;
       left:0;
+    }
+    #print-copies .lbl-box{
       margin:0;
       border-radius:0;
       max-width:none;
       box-shadow:none;
+      page-break-after:always;
     }
+    #print-copies .lbl-box:last-child{ page-break-after:auto; }
     @page{ margin:2mm; }
   }
 </style>
@@ -450,13 +456,16 @@
       </div>
       <p class="hint" id="validade-hint"></p>
 
+      <label for="in-quantidade">Quantidade de etiquetas</label>
+      <input type="number" id="in-quantidade" min="1" value="1">
+
       <button class="btn btn-primary" id="btn-imprimir">🖨️ IMPRIMIR ETIQUETA</button>
     </div>
 
     <div class="card">
       <h2>Prévia</h2>
       <div id="label-preview-wrap">
-        <div id="label"></div>
+        <div id="label" class="lbl-box"></div>
       </div>
     </div>
   </section>
@@ -612,6 +621,8 @@
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal-box" id="modal-box"></div>
 </div>
+
+<div id="print-copies"></div>
 
 <script>
 /*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
@@ -993,36 +1004,63 @@ crc-32/crc32.js:
     return pecas ? " - " + pecas + " PEÇAS" : "";
   }
 
+  // Monta o miolo (sem a moldura) do rótulo a partir de um conjunto de dados —
+  // usado tanto na prévia quanto na impressão (normal e reimpressão do histórico).
+  function buildLabelInnerHTML(d){
+    return `
+      <div class="lbl-title">${escapeHtml(d.nome)}${d.suffix}</div>
+      <div class="lbl-consv">${d.consv}</div>
+      <div class="lbl-dates">
+        <div class="lbl-line"><span>MANIPULAÇÃO:</span><span>${brDate(d.manip)}</span></div>
+        <div class="lbl-line"><span>VALIDADE:</span><span>${brDate(d.validade)}</span></div>
+      </div>
+      <div class="lbl-resp">RESP.: ${escapeHtml(d.sushiman.toUpperCase())}</div>
+      <div class="lbl-footer">
+        <div class="left">
+          ${d.cnpj ? `<span>CNPJ: ${escapeHtml(d.cnpj)}</span><br>` : ""}
+          <b>${escapeHtml(d.loja || "")}</b>
+        </div>
+        <div class="right">${escapeHtml(d.extra || "")}</div>
+      </div>
+    `;
+  }
+
+  function applyLabelSizeStyle(){
+    const cfg = state.config;
+    const style = document.getElementById("label-size-style");
+    style.textContent = `@media print { @page { size: ${cfg.labelW}mm ${cfg.labelH}mm; margin:0; } #print-copies .lbl-box{ width:${cfg.labelW}mm; min-height:${cfg.labelH}mm; padding:3mm 4mm; } }`;
+  }
+
+  // Prepara N cópias do rótulo para a impressão normal (janela de impressão do
+  // navegador) — cada cópia sai numa "página" própria, ou seja, numa etiqueta.
+  function preparePrintCopies(innerHTML, quantity){
+    const qtd = Math.max(1, quantity || 1);
+    const copies = [];
+    for(let i=0;i<qtd;i++) copies.push(`<div class="lbl-box">${innerHTML}</div>`);
+    document.getElementById("print-copies").innerHTML = copies.join("");
+    applyLabelSizeStyle();
+  }
+
   function renderPreview(){
     const c = currentCombinado();
     const nome = c ? c.nome : "—";
-    const consv = inConsv.value;
     const sushimanObj = state.sushimans.find(s=>s.id===selSushiman.value);
     const sushiman = sushimanObj ? sushimanObj.nome : "—";
-    const manip = inManip.value;
-    const validade = inValidade.value;
     const cfg = state.config;
 
-    document.getElementById("label").innerHTML = `
-      <div class="lbl-title">${escapeHtml(nome)}${tituloSuffix()}</div>
-      <div class="lbl-consv">${consv}</div>
-      <div class="lbl-dates">
-        <div class="lbl-line"><span>MANIPULAÇÃO:</span><span>${brDate(manip)}</span></div>
-        <div class="lbl-line"><span>VALIDADE:</span><span>${brDate(validade)}</span></div>
-      </div>
-      <div class="lbl-resp">RESP.: ${escapeHtml(sushiman.toUpperCase())}</div>
-      <div class="lbl-footer">
-        <div class="left">
-          ${cfg.cnpj ? `<span>CNPJ: ${escapeHtml(cfg.cnpj)}</span><br>` : ""}
-          <b>${escapeHtml(cfg.loja || "")}</b>
-        </div>
-        <div class="right">${escapeHtml(cfg.extra || "")}</div>
-      </div>
-    `;
+    document.getElementById("label").innerHTML = buildLabelInnerHTML({
+      nome,
+      suffix: tituloSuffix(),
+      consv: inConsv.value,
+      manip: inManip.value,
+      validade: inValidade.value,
+      sushiman,
+      cnpj: cfg.cnpj,
+      loja: cfg.loja,
+      extra: cfg.extra
+    });
 
-    // apply configured label size for print
-    const style = document.getElementById("label-size-style");
-    style.textContent = `@media print { @page { size: ${cfg.labelW}mm ${cfg.labelH}mm; margin:0; } #label{ width:${cfg.labelW}mm; min-height:${cfg.labelH}mm; padding:3mm 4mm; } }`;
+    applyLabelSizeStyle();
   }
 
   function escapeHtml(str){
@@ -1238,7 +1276,8 @@ crc-32/crc32.js:
     return canvas;
   }
 
-  async function printViaBluetooth(){
+  async function printViaBluetooth(quantity){
+    const qtd = Math.max(1, quantity || 1);
     let canvas = drawLabelCanvas();
 
     // "Girar" vira a etiqueta de cabeça para baixo (180°) mantendo a mesma
@@ -1260,14 +1299,14 @@ crc-32/crc32.js:
     // aqui trocaria as duas, fazendo o conteúdo vazar para a etiqueta seguinte.
     const encoded = niimbluelib.ImageEncoder.encodeCanvas(canvas, "top");
     const printTask = bleClient.abstraction.newPrintTask("B1", {
-      totalPages: 1,
+      totalPages: qtd,
       density: 3,
       statusPollIntervalMs: 100,
       statusTimeoutMs: 8000
     });
     try{
       await printTask.printInit();
-      await printTask.printPage(encoded, 1);
+      await printTask.printPage(encoded, qtd);
       await printTask.waitForPageFinished();
       await printTask.waitForFinished();
     } finally {
@@ -1281,6 +1320,8 @@ crc-32/crc32.js:
     if(!selSushiman.value){ toast("Selecione o sushiman responsável."); return; }
     if(!inManip.value || !inValidade.value){ toast("Preencha as datas."); return; }
 
+    const qtd = Math.max(1, parseInt(document.getElementById("in-quantidade").value, 10) || 1);
+
     renderPreview();
 
     const sushimanObj = state.sushimans.find(s=>s.id===selSushiman.value);
@@ -1293,14 +1334,15 @@ crc-32/crc32.js:
       consv: inConsv.value,
       sushiman: sushimanObj ? sushimanObj.nome : "",
       manip: inManip.value,
-      validade: inValidade.value
+      validade: inValidade.value,
+      qtd: qtd
     });
     save();
 
     if(bleClient && bleClient.isConnected()){
       try{
-        await printViaBluetooth();
-        toast("Etiqueta impressa ✅");
+        await printViaBluetooth(qtd);
+        toast(`${qtd > 1 ? qtd + " etiquetas impressas" : "Etiqueta impressa"} ✅`);
         return;
       }catch(err){
         console.error(err);
@@ -1308,6 +1350,7 @@ crc-32/crc32.js:
       }
     }
 
+    preparePrintCopies(document.getElementById("label").innerHTML, qtd);
     setTimeout(()=>window.print(), 80);
   });
 
@@ -1382,7 +1425,7 @@ crc-32/crc32.js:
         html += `
           <div class="hist-item" data-id="${h.id}">
             <div class="top">
-              <b>${escapeHtml(h.combinado)} ${h.pecas ? "- " + escapeHtml(String(h.pecas)) + "pç" : (h.sabor ? "- " + escapeHtml(h.sabor) : "")}<span class="badge ${badgeClass}">${h.consv}</span></b>
+              <b>${escapeHtml(h.combinado)} ${h.pecas ? "- " + escapeHtml(String(h.pecas)) + "pç" : (h.sabor ? "- " + escapeHtml(h.sabor) : "")}${h.qtd > 1 ? `<span class="badge">x${h.qtd}</span>` : ""}<span class="badge ${badgeClass}">${h.consv}</span></b>
               <span class="time">${time}</span>
             </div>
             <div class="meta">
@@ -1415,24 +1458,20 @@ crc-32/crc32.js:
   function reprintFromHistory(id){
     const h = state.historico.find(x=>x.id===id);
     if(!h) return;
-    document.getElementById("label").innerHTML = `
-      <div class="lbl-title">${escapeHtml(h.combinado)}${h.pecas ? " - " + h.pecas + " PEÇAS" : (h.sabor ? " - " + escapeHtml(h.sabor.toUpperCase()) : "")}</div>
-      <div class="lbl-consv">${h.consv}</div>
-      <div class="lbl-dates">
-        <div class="lbl-line"><span>MANIPULAÇÃO:</span><span>${brDate(h.manip)}</span></div>
-        <div class="lbl-line"><span>VALIDADE:</span><span>${brDate(h.validade)}</span></div>
-      </div>
-      <div class="lbl-resp">RESP.: ${escapeHtml(h.sushiman.toUpperCase())}</div>
-      <div class="lbl-footer">
-        <div class="left">
-          ${state.config.cnpj ? `<span>CNPJ: ${escapeHtml(state.config.cnpj)}</span><br>` : ""}
-          <b>${escapeHtml(state.config.loja || "")}</b>
-        </div>
-        <div class="right">${escapeHtml(state.config.extra || "")}</div>
-      </div>
-    `;
-    const style = document.getElementById("label-size-style");
-    style.textContent = `@media print { @page { size: ${state.config.labelW}mm ${state.config.labelH}mm; margin:0; } #label{ width:${state.config.labelW}mm; min-height:${state.config.labelH}mm; padding:3mm 4mm; } }`;
+    const suffix = h.pecas ? " - " + h.pecas + " PEÇAS" : (h.sabor ? " - " + escapeHtml(h.sabor.toUpperCase()) : "");
+    const innerHTML = buildLabelInnerHTML({
+      nome: h.combinado,
+      suffix,
+      consv: h.consv,
+      manip: h.manip,
+      validade: h.validade,
+      sushiman: h.sushiman,
+      cnpj: state.config.cnpj,
+      loja: state.config.loja,
+      extra: state.config.extra
+    });
+    document.getElementById("label").innerHTML = innerHTML;
+    preparePrintCopies(innerHTML, h.qtd || 1);
     setTimeout(()=>window.print(), 80);
   }
 

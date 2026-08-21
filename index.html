@@ -1547,6 +1547,20 @@ This typically indicates that your device does not have a healthy Internet conne
     return best;
   }
 
+  // Tenta achar um sushiman já cadastrado cujo nome bata com o nome de quem
+  // marcou o pedido como pronto na Saipos (ex: "LUISA" bate com "Luisa",
+  // "Júlia Maria" bate com "Júlia"). Se não achar, volta null (usa o padrão).
+  function matchSushimanByName(name){
+    if(!name) return null;
+    const norm = stripAccents(String(name).toUpperCase()).trim();
+    if(!norm) return null;
+    for(const s of state.sushimans){
+      const sNorm = stripAccents(s.nome.toUpperCase()).trim();
+      if(sNorm && (norm.includes(sNorm) || sNorm.includes(norm))) return s;
+    }
+    return null;
+  }
+
   // Tenta achar, no texto do item/opções da Saipos, qual variante (tamanho ou
   // sabor) do combinado bate. Se não achar nenhuma, usa a primeira.
   function matchVarianteFromText(combinado, texts){
@@ -1612,7 +1626,10 @@ This typically indicates that your device does not have a healthy Internet conne
         if(currentVariantType === "pecas") inPecas.value = product.variante;
         renderPreview();
       }
-      if(state.config.saiposSushimanId){
+      const matchedSushiman = matchSushimanByName(job.saiposUserName);
+      if(matchedSushiman){
+        selSushiman.value = matchedSushiman.id;
+      } else if(state.config.saiposSushimanId){
         selSushiman.value = state.config.saiposSushimanId;
       }
       document.getElementById("in-quantidade").value = product.quantity;

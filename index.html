@@ -531,7 +531,7 @@
 
     <div class="card">
       <h2>Importar de planilha</h2>
-      <p class="hint" style="margin-top:0;">Aceita .xlsx, .xls ou .csv. Colunas esperadas: <b>nome</b>, <b>pecas</b>, <b>validade_dias</b> — cabeçalho na primeira linha. Combinado com nome já existente é atualizado. Para várias opções, separe com ; na coluna peças — números viram tamanho (ex: <b>31;62</b>), texto vira sabor (ex: <b>Salmão;Camarão</b>). Deixe a célula vazia se não houver variação.</p>
+      <p class="hint" style="margin-top:0;">Aceita .xlsx, .xls ou .csv. Colunas esperadas: <b>nome</b>, <b>pecas</b>, <b>validade_dias</b> e, opcional, <b>apelidos</b> (nomes que esse combinado usa na Saipos, separados por ; — usado pela impressão automática) — cabeçalho na primeira linha. Combinado com nome já existente é atualizado. Para várias opções, separe com ; na coluna peças — números viram tamanho (ex: <b>31;62</b>), texto vira sabor (ex: <b>Salmão;Camarão</b>). Deixe a célula vazia se não houver variação.</p>
       <label for="cb-import-file">Escolher arquivo</label>
       <input type="file" id="cb-import-file" accept=".xlsx,.xls,.csv">
       <button class="btn btn-secondary" id="cb-download-template" style="margin-top:12px;">⬇️ Baixar modelo de planilha</button>
@@ -773,6 +773,7 @@ This typically indicates that your device does not have a healthy Internet conne
       }
       delete c.pecas;
       delete c.tamanhos;
+      if(!Array.isArray(c.apelidos)) c.apelidos = [];
     });
     return list;
   }
@@ -1510,16 +1511,37 @@ This typically indicates that your device does not have a healthy Internet conne
       });
   }
 
-  // Tenta achar o combinado cujo nome aparece na descrição do item da Saipos.
-  // Quando a descrição junta vários produtos, fica com o nome mais longo que
-  // bater (mais específico), pra reduzir falso positivo.
-  function matchCombinadoFromDesc(desc){
-    const norm = stripAccents(String(desc || "").toUpperCase());
+  // Um item da Saipos pode ser um combo com vários produtos juntos, separados
+  // por "+" (ex: "1 temaki hot + 10 hot roll + 1 lata Coca-Cola"). Cada pedaço
+  // pode ter uma quantidade na frente ("10 hot roll").
+  function splitSaiposDesc(desc){
+    return String(desc || "")
+      .split("+")
+      .map(part=>{
+        part = part.trim();
+        const m = part.match(/^(\d+)\s*[xX]?\s+(.*)$/);
+        if(m){
+          return { quantity: parseInt(m[1], 10) || 1, text: m[2].trim() };
+        }
+        return { quantity: 1, text: part };
+      })
+      .filter(p=>p.text.length > 0);
+  }
+
+  // Acha o combinado cujo nome (ou apelido cadastrado na Saipos) aparece no
+  // texto. Fica com o nome/apelido mais longo que bater, pra reduzir engano.
+  function matchCombinadoInText(text){
+    const norm = stripAccents(String(text || "").toUpperCase());
     let best = null;
+    let bestLen = 0;
     for(const c of state.combinados){
-      const nomeNorm = stripAccents(c.nome.toUpperCase());
-      if(nomeNorm && norm.includes(nomeNorm)){
-        if(!best || nomeNorm.length > stripAccents(best.nome.toUpperCase()).length) best = c;
+      const candidates = [c.nome, ...(c.apelidos || [])];
+      for(const cand of candidates){
+        const candNorm = stripAccents(String(cand).toUpperCase());
+        if(candNorm && norm.includes(candNorm) && candNorm.length > bestLen){
+          best = c;
+          bestLen = candNorm.length;
+        }
       }
     }
     return best;
@@ -1535,6 +1557,28 @@ This typically indicates that your device does not have a healthy Internet conne
     return combinado.variantes[0];
   }
 
+  // Quebra a descrição em produtos, acha o combinado de cada um (ignorando
+  // silenciosamente o que não bater, tipo bebidas) e retorna uma etiqueta pra
+  // cada produto reconhecido.
+  function matchAllProductsFromJob(job){
+    const parts = splitSaiposDesc(job.desc);
+    const results = [];
+    for(const part of parts){
+      const combinado = matchCombinadoInText(part.text);
+      if(combinado){
+        const varianteMatch = combinado.variantes.length
+          ? matchVarianteFromText(combinado, [part.text, ...(job.choices || [])])
+          : null;
+        results.push({
+          combinado,
+          variante: varianteMatch,
+          quantity: Math.max(1, part.quantity) * Math.max(1, job.quantity || 1)
+        });
+      }
+    }
+    return results;
+  }
+
   // IDs já tratados nesta sessão — evita imprimir 2x se o mesmo aviso chegar
   // de novo antes do Firestore confirmar que já foi marcado como processado
   // (pode acontecer se a aba travar esperando a caixa de impressão nativa).
@@ -1545,40 +1589,40 @@ This typically indicates that your device does not have a healthy Internet conne
     saiposHandledIds.add(doc.id);
 
     const job = doc.data();
-    const combinado = matchCombinadoFromDesc(job.desc);
+    const products = matchAllProductsFromJob(job);
 
     // Marca como processado ANTES de imprimir — garante que nunca imprime
     // duas vezes o mesmo aviso, mesmo que a impressão em si falhe.
     await doc.ref.update({
       processed: true,
       processedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      matched: !!combinado,
-      matchedCombinado: combinado ? combinado.nome : null
+      matched: products.length > 0,
+      matchedCombinado: products.map(p=>p.combinado.nome).join(", ") || null
     }).catch(e=>console.error("Erro marcando pedido como processado:", e));
 
-    if(!combinado){
+    if(products.length === 0){
       printConfirm(`Saipos: não reconheci "${job.desc}" — imprima manualmente.`, true);
       return;
     }
 
-    selectCombinadoById(combinado.id);
-    if(combinado.variantes.length){
-      const varianteMatch = matchVarianteFromText(combinado, [job.desc, ...(job.choices || [])]);
-      selTamanho.value = varianteMatch;
-      if(currentVariantType === "pecas") inPecas.value = varianteMatch;
-      renderPreview();
-    }
+    for(const product of products){
+      selectCombinadoById(product.combinado.id);
+      if(product.variante !== null){
+        selTamanho.value = product.variante;
+        if(currentVariantType === "pecas") inPecas.value = product.variante;
+        renderPreview();
+      }
+      if(state.config.saiposSushimanId){
+        selSushiman.value = state.config.saiposSushimanId;
+      }
+      document.getElementById("in-quantidade").value = product.quantity;
+      inManip.value = todayISO();
+      recalcValidade();
 
-    if(state.config.saiposSushimanId){
-      selSushiman.value = state.config.saiposSushimanId;
-    }
-    document.getElementById("in-quantidade").value = Math.max(1, job.quantity || 1);
-    inManip.value = todayISO();
-    recalcValidade();
-
-    const ok = await doPrint("saipos");
-    if(!ok){
-      printConfirm(`Saipos: "${combinado.nome}" reconhecido, mas faltou informação pra imprimir (confira sushiman/datas).`, true);
+      const ok = await doPrint("saipos");
+      if(!ok){
+        printConfirm(`Saipos: "${product.combinado.nome}" reconhecido, mas faltou informação pra imprimir (confira sushiman/datas).`, true);
+      }
     }
   }
 
@@ -1752,6 +1796,9 @@ This typically indicates that your device does not have a healthy Internet conne
       <input type="text" id="modal-cb-pecas" value="${escapeHtml(c.variantes.join(";"))}">
       <label>Validade (dias)</label>
       <input type="number" id="modal-cb-validade" min="0" value="${c.validadeDias}">
+      <label>Apelidos na Saipos (opcional, separe com ; — ex: hot roll)</label>
+      <input type="text" id="modal-cb-apelidos" value="${escapeHtml((c.apelidos || []).join(";"))}">
+      <p class="hint" style="margin-top:0;">Use quando o nome do produto na Saipos é diferente do nome do combinado aqui (ex: Saipos chama de "hot roll" o que aqui é "HOT PHILADELPHIA").</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="modal-cancel">Cancelar</button>
         <button class="btn btn-primary" id="modal-save">Salvar</button>
@@ -1763,9 +1810,11 @@ This typically indicates that your device does not have a healthy Internet conne
       if(!nome){ toast("Digite o nome do combinado."); return; }
       const variantes = parseVariantes(document.getElementById("modal-cb-pecas").value);
       const validade = document.getElementById("modal-cb-validade").value;
+      const apelidos = parseVariantes(document.getElementById("modal-cb-apelidos").value).map(a=>a.toUpperCase());
       c.nome = nome.toUpperCase();
       c.variantes = variantes;
       c.validadeDias = validade === "" ? c.validadeDias : Number(validade);
+      c.apelidos = apelidos;
       save();
       closeModal();
       renderCombinados();
@@ -1779,7 +1828,7 @@ This typically indicates that your device does not have a healthy Internet conne
     const variantes = parseVariantes(document.getElementById("cb-pecas").value);
     const validade = document.getElementById("cb-validade").value === "" ? 1 : Number(document.getElementById("cb-validade").value);
     if(!nome){ toast("Digite o nome do combinado."); return; }
-    state.combinados.push({ id: cryptoId(), nome: nome.toUpperCase(), variantes, validadeDias: validade });
+    state.combinados.push({ id: cryptoId(), nome: nome.toUpperCase(), variantes, validadeDias: validade, apelidos: [] });
     save();
     document.getElementById("cb-nome").value = "";
     document.getElementById("cb-pecas").value = "";
@@ -1827,9 +1876,10 @@ This typically indicates that your device does not have a healthy Internet conne
   const IMPORT_FIELD_KEYWORDS = {
     nome: ["nome", "combinado", "item", "produto"],
     validade: ["validade", "dias"],
+    apelidos: ["apelido", "alias", "saipos"],
     pecas: ["peca", "qtd", "quant"]
   };
-  const IMPORT_FIELD_ORDER = ["nome", "validade", "pecas"];
+  const IMPORT_FIELD_ORDER = ["nome", "validade", "apelidos", "pecas"];
 
   function matchImportField(headerNorm){
     for(const field of IMPORT_FIELD_ORDER){
@@ -1864,17 +1914,20 @@ This typically indicates that your device does not have a healthy Internet conne
       const nome = nomeRaw.toUpperCase();
       const variantes = fieldMap.pecas ? parseVariantes(row[fieldMap.pecas]) : [];
       const validadeDias = fieldMap.validade ? (Number(row[fieldMap.validade]) || 0) : 0;
+      const apelidos = fieldMap.apelidos ? parseVariantes(row[fieldMap.apelidos]).map(a=>a.toUpperCase()) : null;
       const existing = state.combinados.find(c=>c.nome === nome);
       if(existing){
         if(fieldMap.pecas) existing.variantes = variantes;
         if(fieldMap.validade) existing.validadeDias = validadeDias || existing.validadeDias;
+        if(apelidos) existing.apelidos = apelidos;
         updated++;
       } else {
         state.combinados.push({
           id: cryptoId(),
           nome,
           variantes: variantes,
-          validadeDias: validadeDias || 1
+          validadeDias: validadeDias || 1,
+          apelidos: apelidos || []
         });
         added++;
       }

@@ -616,13 +616,10 @@
     </div>
 
     <div class="card">
-      <h2>Impressora Bluetooth (NIIMBOT)</h2>
-      <p class="hint" style="margin-top:0;">Conecte a impressora uma vez para imprimir sem abrir a caixa de diálogo do Android. Precisa conectar de novo toda vez que abrir o app (regra de segurança do navegador) — mas enquanto ficar conectada, cada etiqueta imprime direto.</p>
-      <p class="hint" id="ble-status">Não conectada.</p>
-      <div class="row2">
-        <button class="btn btn-primary" id="ble-connect">🔗 Conectar impressora</button>
-        <button class="btn btn-secondary" id="ble-disconnect" style="display:none;">Desconectar</button>
-      </div>
+      <h2>Impressoras Bluetooth (NIIMBOT)</h2>
+      <p class="hint" style="margin-top:0;">Conecte cada impressora uma vez para imprimir sem abrir a caixa de diálogo do Android. Precisa conectar de novo toda vez que abrir o app (regra de segurança do navegador) — mas enquanto ficar conectada, cada etiqueta imprime direto. Com mais de uma impressora cadastrada, você escolhe na aba Sushimans qual impressora cada sushiman usa.</p>
+      <div id="printers-list"></div>
+      <button class="btn btn-primary" id="printer-add" style="margin-top:10px;">+ Adicionar impressora</button>
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
         <input type="checkbox" id="cfg-ble-rotate" style="width:auto;">
         <span style="font-weight:600; color:var(--text);">Virar etiqueta de cabeça para baixo (se sair invertida na impressora)</span>
@@ -739,6 +736,9 @@ This typically indicates that your device does not have a healthy Internet conne
       { id: cryptoId(), nome: "60x40mm", w: 60, h: 40 },
       { id: cryptoId(), nome: "50x30mm", w: 50, h: 30 }
     ],
+    printers: [
+      { id: cryptoId(), nome: "Impressora 1" }
+    ],
     config: {
       loja: "SAKURA SUSHI",
       cnpj: "",
@@ -778,6 +778,13 @@ This typically indicates that your device does not have a healthy Internet conne
     return list;
   }
 
+  function migrateSushimans(list){
+    (list || []).forEach(s=>{
+      if(typeof s.printerId !== "string") s.printerId = "";
+    });
+    return list;
+  }
+
   function load(){
     try{
       const raw = localStorage.getItem(STORE_KEY);
@@ -787,6 +794,10 @@ This typically indicates that your device does not have a healthy Internet conne
         config: Object.assign({}, defaultData.config, parsed.config || {})
       });
       merged.combinados = migrateCombinados(merged.combinados);
+      merged.sushimans = migrateSushimans(merged.sushimans);
+      if(!Array.isArray(merged.printers) || merged.printers.length === 0){
+        merged.printers = structuredClone(defaultData.printers);
+      }
       return merged;
     }catch(e){
       console.error("Erro ao carregar dados", e);
@@ -1146,55 +1157,134 @@ This typically indicates that your device does not have a healthy Internet conne
   }
 
   // ================= IMPRESSÃO DIRETA POR BLUETOOTH (NIIMBOT) =================
-  let bleClient = null;
+  // Uma ou mais impressoras podem ficar conectadas ao mesmo tempo nesta aba.
+  // bleClients guarda, por id de impressora cadastrada, a conexão ativa (se
+  // houver). Cada sushiman pode ser associado a uma impressora específica
+  // (aba Sushimans) — se não tiver associação, usa qualquer uma conectada.
+  const bleClients = {};
   const bleSupported = typeof navigator !== "undefined" && !!navigator.bluetooth && typeof niimbluelib !== "undefined";
 
-  function updateBleStatus(text){
-    const el = document.getElementById("ble-status");
-    if(el) el.textContent = text;
+  function renderPrintersList(){
+    const list = document.getElementById("printers-list");
+    if(!bleSupported){
+      list.innerHTML = `<p class="hint" style="margin-top:0;">Esse navegador não suporta impressão Bluetooth direta (funciona no Chrome Android).</p>`;
+      return;
+    }
+    if(state.printers.length === 0){
+      list.innerHTML = `<p class="empty">Nenhuma impressora cadastrada ainda.</p>`;
+      return;
+    }
+    list.innerHTML = state.printers.map(p=>{
+      const entry = bleClients[p.id];
+      const connected = !!(entry && entry.client.isConnected());
+      const statusText = connected ? `Conectada: ${entry.deviceName || "impressora"}` : "Não conectada.";
+      return `
+        <div class="list-item" data-id="${p.id}">
+          <div class="info">
+            <b>${escapeHtml(p.nome)}</b>
+            <span>${statusText}</span>
+          </div>
+          <div class="actions">
+            <button class="icon-btn printer-connect" data-id="${p.id}" style="display:${connected ? "none" : ""};">🔗</button>
+            <button class="icon-btn printer-disconnect" data-id="${p.id}" style="display:${connected ? "" : "none"};">⏏️</button>
+            <button class="icon-btn del printer-delete" data-id="${p.id}">🗑️</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    list.querySelectorAll(".printer-connect").forEach(btn=>{
+      btn.addEventListener("click", ()=>connectPrinter(btn.dataset.id));
+    });
+    list.querySelectorAll(".printer-disconnect").forEach(btn=>{
+      btn.addEventListener("click", ()=>disconnectPrinter(btn.dataset.id));
+    });
+    list.querySelectorAll(".printer-delete").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const p = state.printers.find(x=>x.id === btn.dataset.id);
+        if(!p) return;
+        confirmModal(`Excluir "${p.nome}"?`, "Excluir", ()=>{
+          disconnectPrinter(p.id);
+          state.printers = state.printers.filter(x=>x.id !== p.id);
+          state.sushimans.forEach(s=>{ if(s.printerId === p.id) s.printerId = ""; });
+          save();
+          renderPrintersList();
+          renderSushimans();
+          toast("Impressora excluída.");
+        });
+      });
+    });
   }
 
-  function setBleConnectedUI(connected, deviceName){
-    document.getElementById("ble-connect").style.display = connected ? "none" : "";
-    document.getElementById("ble-disconnect").style.display = connected ? "" : "none";
-    updateBleStatus(connected ? `Conectada: ${deviceName || "impressora"}` : "Não conectada.");
-  }
-
-  if(!bleSupported){
-    updateBleStatus("Esse navegador não suporta impressão Bluetooth direta (funciona no Chrome Android).");
-  }
-
-  document.getElementById("ble-connect").addEventListener("click", async ()=>{
+  async function connectPrinter(printerId){
     if(!bleSupported){
       toast("Esse navegador não suporta impressão Bluetooth direta.");
       return;
     }
     try{
-      updateBleStatus("Conectando...");
-      bleClient = new niimbluelib.NiimbotBluetoothClient();
-      bleClient.on("disconnect", ()=>{
-        bleClient = null;
-        setBleConnectedUI(false);
+      const client = new niimbluelib.NiimbotBluetoothClient();
+      client.on("disconnect", ()=>{
+        delete bleClients[printerId];
+        renderPrintersList();
         toast("Impressora desconectada.");
       });
-      const info = await bleClient.connect();
-      setBleConnectedUI(true, info.deviceName);
+      const info = await client.connect();
+      bleClients[printerId] = { client, deviceName: info.deviceName };
+      renderPrintersList();
       toast("Impressora conectada ✅");
     }catch(err){
       console.error(err);
-      bleClient = null;
-      updateBleStatus("Não conectada.");
       toast("Não foi possível conectar à impressora.");
     }
+  }
+
+  async function disconnectPrinter(printerId){
+    const entry = bleClients[printerId];
+    if(entry){
+      await entry.client.disconnect();
+      delete bleClients[printerId];
+    }
+    renderPrintersList();
+  }
+
+  document.getElementById("printer-add").addEventListener("click", ()=>{
+    openModal(`
+      <h3>Adicionar impressora</h3>
+      <label>Nome da impressora</label>
+      <input type="text" id="modal-printer-nome" placeholder="Ex: Impressora 2">
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modal-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="modal-save">Salvar</button>
+      </div>
+    `);
+    document.getElementById("modal-cancel").addEventListener("click", closeModal);
+    document.getElementById("modal-save").addEventListener("click", ()=>{
+      const nome = document.getElementById("modal-printer-nome").value.trim() || `Impressora ${state.printers.length + 1}`;
+      state.printers.push({ id: cryptoId(), nome });
+      save();
+      closeModal();
+      renderPrintersList();
+      renderSushimans();
+      toast("Impressora adicionada ✅");
+    });
   });
 
-  document.getElementById("ble-disconnect").addEventListener("click", async ()=>{
-    if(bleClient){
-      await bleClient.disconnect();
-      bleClient = null;
+  // Acha a impressora conectada certa pra esse sushiman: a que foi associada
+  // a ele, ou — se não tiver associação, ou a associada não estiver conectada
+  // agora — qualquer outra impressora que esteja conectada.
+  function resolvePrinterClientForSushiman(sushimanId){
+    const sushiman = state.sushimans.find(s=>s.id === sushimanId);
+    const assignedId = sushiman ? sushiman.printerId : "";
+    if(assignedId && bleClients[assignedId] && bleClients[assignedId].client.isConnected()){
+      return bleClients[assignedId].client;
     }
-    setBleConnectedUI(false);
-  });
+    for(const pid in bleClients){
+      if(bleClients[pid].client.isConnected()) return bleClients[pid].client;
+    }
+    return null;
+  }
+
+  renderPrintersList();
 
   function mmToPx(mm){
     return Math.round(mm / 25.4 * 203);
@@ -1354,7 +1444,7 @@ This typically indicates that your device does not have a healthy Internet conne
     return canvas;
   }
 
-  async function printViaBluetooth(quantity){
+  async function printViaBluetooth(client, quantity){
     const qtd = Math.max(1, quantity || 1);
     let canvas = drawLabelCanvas();
 
@@ -1376,7 +1466,7 @@ This typically indicates that your device does not have a healthy Internet conne
     // comprimento ao longo do rolo). É a orientação nativa da B1 — usar "left"
     // aqui trocaria as duas, fazendo o conteúdo vazar para a etiqueta seguinte.
     const encoded = niimbluelib.ImageEncoder.encodeCanvas(canvas, "top");
-    const printTask = bleClient.abstraction.newPrintTask("B1", {
+    const printTask = client.abstraction.newPrintTask("B1", {
       totalPages: qtd,
       density: 3,
       statusPollIntervalMs: 100,
@@ -1427,9 +1517,10 @@ This typically indicates that your device does not have a healthy Internet conne
     });
     save();
 
-    if(bleClient && bleClient.isConnected()){
+    const targetClient = resolvePrinterClientForSushiman(selSushiman.value);
+    if(targetClient){
       try{
-        await printViaBluetooth(qtd);
+        await printViaBluetooth(targetClient, qtd);
         printConfirm(qtd > 1 ? `${qtd} etiquetas enviadas com sucesso!` : "Etiqueta enviada com sucesso!");
         return true;
       }catch(err){
@@ -1976,7 +2067,7 @@ This typically indicates that your device does not have a healthy Internet conne
       if(!nomeRaw){ skipped++; return; }
       const exists = state.sushimans.some(s=>s.nome.toLowerCase() === nomeRaw.toLowerCase());
       if(exists){ skipped++; return; }
-      state.sushimans.push({ id: cryptoId(), nome: nomeRaw });
+      state.sushimans.push({ id: cryptoId(), nome: nomeRaw, printerId: "" });
       added++;
     });
     return { added, skipped };
@@ -2042,14 +2133,30 @@ This typically indicates that your device does not have a healthy Internet conne
       list.innerHTML = `<p class="empty">Nenhum sushiman cadastrado ainda.</p>`;
       return;
     }
+    const showPrinterSelect = state.printers.length > 1;
     list.innerHTML = state.sushimans.map(s=>`
       <div class="list-item" data-id="${s.id}">
-        <div class="info"><b>${escapeHtml(s.nome)}</b></div>
+        <div class="info">
+          <b>${escapeHtml(s.nome)}</b>
+          ${showPrinterSelect ? `
+            <select class="sm-printer-select" data-id="${s.id}" style="width:auto; max-width:220px; padding:4px 8px; font-size:12px; margin-top:6px;">
+              <option value="">Qualquer impressora conectada</option>
+              ${state.printers.map(p=>`<option value="${p.id}" ${s.printerId===p.id ? "selected" : ""}>${escapeHtml(p.nome)}</option>`).join("")}
+            </select>
+          ` : ""}
+        </div>
         <div class="actions">
           <button class="icon-btn del del-sm" data-id="${s.id}">🗑️</button>
         </div>
       </div>
     `).join("");
+
+    list.querySelectorAll(".sm-printer-select").forEach(sel=>{
+      sel.addEventListener("change", ()=>{
+        const s = state.sushimans.find(x=>x.id === sel.dataset.id);
+        if(s){ s.printerId = sel.value; save(); }
+      });
+    });
 
     list.querySelectorAll(".del-sm").forEach(btn=>{
       btn.addEventListener("click", ()=>{
@@ -2069,7 +2176,7 @@ This typically indicates that your device does not have a healthy Internet conne
   document.getElementById("sm-add").addEventListener("click", ()=>{
     const nome = document.getElementById("sm-nome").value.trim();
     if(!nome){ toast("Digite o nome do sushiman."); return; }
-    state.sushimans.push({ id: cryptoId(), nome });
+    state.sushimans.push({ id: cryptoId(), nome, printerId: "" });
     save();
     document.getElementById("sm-nome").value = "";
     renderSushimans();
@@ -2089,6 +2196,7 @@ This typically indicates that your device does not have a healthy Internet conne
     document.getElementById("cfg-sync-sushimans").value = state.config.syncSushimansUrl || "";
     document.getElementById("cfg-sync-auto").checked = !!state.config.syncAuto;
     document.getElementById("cfg-ble-rotate").checked = !!state.config.bleRotate;
+    renderPrintersList();
     document.getElementById("cfg-saipos-auto").checked = !!state.config.saiposAutoEnabled;
     populateSaiposSushimanSelect();
     updateSyncStatus();

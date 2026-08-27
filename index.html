@@ -426,6 +426,7 @@
     <button data-tab="historico">Histórico</button>
     <button data-tab="combinados">Combinados</button>
     <button data-tab="sushimans">Sushimans</button>
+    <button data-tab="automacao">Automação</button>
     <button data-tab="config">Config</button>
   </nav>
 </header>
@@ -548,6 +549,28 @@
         <input type="text" id="sm-nome" placeholder="Ex: João">
         <button class="btn btn-primary" id="sm-add">+ Adicionar sushiman</button>
       </div>
+    </div>
+  </section>
+
+  <!-- ===================== TAB: AUTOMAÇÃO ===================== -->
+  <section id="tab-automacao" style="display:none;">
+    <div class="card">
+      <h2>Combos com várias etiquetas</h2>
+      <p class="hint" style="margin-top:0;">Quando um pedido da Saipos contiver o texto abaixo, imprime uma etiqueta pra cada item da lista (em vez de tentar casar pelo nome do combo). Usado pra promoções/combos que juntam vários produtos num item só.</p>
+      <div id="combo-expansoes-list"></div>
+      <div class="add-form">
+        <label>Texto que aparece na Saipos</label>
+        <input type="text" id="ce-texto" placeholder="Ex: Combo I Love Hot">
+        <label>Itens a imprimir (separe com ; — use : pra forçar um sabor, ex: CROQUETES:SALMÃO)</label>
+        <input type="text" id="ce-itens" placeholder="Ex: SUPREME HOT;MIX NUTELLA">
+        <button class="btn btn-primary" id="ce-add">+ Adicionar regra</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Não imprimir automaticamente</h2>
+      <p class="hint" style="margin-top:0;">Esses combinados continuam sendo reconhecidos normalmente, mas não geram etiqueta sozinhos quando um pedido da Saipos fica pronto (ex: Yakisoba).</p>
+      <div id="sem-autoprint-list"></div>
     </div>
   </section>
 
@@ -740,6 +763,11 @@ This typically indicates that your device does not have a healthy Internet conne
       { id: cryptoId(), nome: "Impressora 1" },
       { id: cryptoId(), nome: "Impressora 2" }
     ],
+    comboExpansoes: [
+      { id: cryptoId(), texto: "COMBO I LOVE HOT", itens: [{nome:"SUPREME HOT", variante:null}, {nome:"MIX NUTELLA", variante:null}] },
+      { id: cryptoId(), texto: "COMBO SAKURA LOVE", itens: [{nome:"MAGNIFIC SALMON", variante:null}, {nome:"MIX NUTELLA", variante:null}, {nome:"CROQUETES", variante:"SALMÃO"}] }
+    ],
+    semAutoprint: ["YAKISOBA"],
     config: {
       loja: "SAKURA SUSHI",
       cnpj: "",
@@ -799,6 +827,12 @@ This typically indicates that your device does not have a healthy Internet conne
       merged.sushimans = migrateSushimans(merged.sushimans);
       if(!Array.isArray(merged.printers) || merged.printers.length === 0){
         merged.printers = structuredClone(defaultData.printers);
+      }
+      if(!Array.isArray(merged.comboExpansoes)){
+        merged.comboExpansoes = structuredClone(defaultData.comboExpansoes);
+      }
+      if(!Array.isArray(merged.semAutoprint)){
+        merged.semAutoprint = structuredClone(defaultData.semAutoprint);
       }
       return merged;
     }catch(e){
@@ -886,8 +920,102 @@ This typically indicates that your device does not have a healthy Internet conne
     return "sem tamanho/sabor fixo";
   }
 
+  // ---------- AUTOMAÇÃO (combos com várias etiquetas / exclusão de auto-impressão) ----------
+  // Cada item vira {nome, variante} — variante nula usa a primeira disponível
+  // do combinado. Ex: "SUPREME HOT;MIX NUTELLA;CROQUETES:SALMÃO".
+  function parseComboItens(str){
+    return String(str || "")
+      .split(";")
+      .map(s=>s.trim())
+      .filter(s=>s.length > 0)
+      .map(token=>{
+        const idx = token.indexOf(":");
+        if(idx === -1) return { nome: token.trim().toUpperCase(), variante: null };
+        return {
+          nome: token.slice(0, idx).trim().toUpperCase(),
+          variante: token.slice(idx + 1).trim().toUpperCase() || null
+        };
+      });
+  }
+
+  function renderComboExpansoesList(){
+    const list = document.getElementById("combo-expansoes-list");
+    if(!list) return;
+    if(state.comboExpansoes.length === 0){
+      list.innerHTML = `<p class="hint">Nenhuma regra cadastrada.</p>`;
+      return;
+    }
+    list.innerHTML = state.comboExpansoes.map(ce=>`
+      <div class="list-item" data-id="${ce.id}">
+        <div class="info">
+          <b>${escapeHtml(ce.texto)}</b>
+          <span>${ce.itens.map(i=>escapeHtml(i.nome + (i.variante ? " (" + i.variante + ")" : ""))).join(", ")}</span>
+        </div>
+        <div class="actions">
+          <button class="icon-btn del del-ce" data-id="${ce.id}">🗑️</button>
+        </div>
+      </div>
+    `).join("");
+    list.querySelectorAll(".del-ce").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const ce = state.comboExpansoes.find(x=>x.id===btn.dataset.id);
+        if(!ce) return;
+        confirmModal(`Excluir a regra "${ce.texto}"?`, "Excluir", ()=>{
+          state.comboExpansoes = state.comboExpansoes.filter(x=>x.id!==btn.dataset.id);
+          save();
+          renderComboExpansoesList();
+          toast("Regra excluída.");
+        });
+      });
+    });
+  }
+
+  function renderSemAutoprintList(){
+    const list = document.getElementById("sem-autoprint-list");
+    if(!list) return;
+    if(state.combinados.length === 0){
+      list.innerHTML = `<p class="hint">Cadastre combinados primeiro.</p>`;
+      return;
+    }
+    list.innerHTML = state.combinados.map(c=>`
+      <label style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+        <input type="checkbox" class="sem-autoprint-cb" data-nome="${escapeHtml(c.nome)}" ${state.semAutoprint.includes(c.nome) ? "checked" : ""} style="width:auto;">
+        <span>${escapeHtml(c.nome)}</span>
+      </label>
+    `).join("");
+    list.querySelectorAll(".sem-autoprint-cb").forEach(cb=>{
+      cb.addEventListener("change", ()=>{
+        const nome = cb.dataset.nome;
+        if(cb.checked){
+          if(!state.semAutoprint.includes(nome)) state.semAutoprint.push(nome);
+        } else {
+          state.semAutoprint = state.semAutoprint.filter(n=>n!==nome);
+        }
+        save();
+      });
+    });
+  }
+
+  function renderAutomacao(){
+    renderComboExpansoesList();
+    renderSemAutoprintList();
+  }
+
+  document.getElementById("ce-add").addEventListener("click", ()=>{
+    const texto = document.getElementById("ce-texto").value.trim();
+    if(!texto){ toast("Digite o texto que aparece na Saipos."); return; }
+    const itens = parseComboItens(document.getElementById("ce-itens").value);
+    if(itens.length === 0){ toast("Digite pelo menos um item."); return; }
+    state.comboExpansoes.push({ id: cryptoId(), texto: texto.toUpperCase(), itens });
+    save();
+    document.getElementById("ce-texto").value = "";
+    document.getElementById("ce-itens").value = "";
+    renderComboExpansoesList();
+    toast("Regra adicionada ✅");
+  });
+
   // ---------- TABS ----------
-  const tabs = ["nova","historico","combinados","sushimans","config"];
+  const tabs = ["nova","historico","combinados","sushimans","automacao","config"];
   document.querySelectorAll("nav button").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
@@ -898,6 +1026,7 @@ This typically indicates that your device does not have a healthy Internet conne
       if(btn.dataset.tab === "historico") renderHistorico();
       if(btn.dataset.tab === "combinados") renderCombinados();
       if(btn.dataset.tab === "sushimans") renderSushimans();
+      if(btn.dataset.tab === "automacao") renderAutomacao();
       if(btn.dataset.tab === "config") fillConfigForm();
       if(btn.dataset.tab === "nova") refreshNovaSelections();
     });
@@ -1646,20 +1775,16 @@ This typically indicates that your device does not have a healthy Internet conne
 
   // Combos vendidos como um item só na Saipos, mas que imprimem mais de uma
   // etiqueta (produtos fixos, sem depender do texto do pedido pra achar cada
-  // um). Chave = texto que aparece na Saipos, valor = nomes dos combinados
-  // (ou {nome, variante} quando precisa forçar um sabor específico).
-  var KNOWN_COMBO_EXPANSIONS = {
-    "COMBO I LOVE HOT": ["SUPREME HOT", "MIX NUTELLA"],
-    "COMBO SAKURA LOVE": ["MAGNIFIC SALMON", "MIX NUTELLA", {nome:"CROQUETES", variante:"SALMÃO"}]
-  };
+  // um). Configurados na aba "Automação" (state.comboExpansoes) — cada item
+  // é {nome, variante}, com variante nula quando usa a primeira disponível.
   function matchComboExpansion(text){
     const norm = stripAccents(String(text || "").toUpperCase());
     let best = null;
     let bestLen = 0;
-    for(const key in KNOWN_COMBO_EXPANSIONS){
-      const keyNorm = stripAccents(key.toUpperCase());
+    for(const ce of state.comboExpansoes){
+      const keyNorm = stripAccents(String(ce.texto).toUpperCase());
       if(keyNorm && norm.includes(keyNorm) && keyNorm.length > bestLen){
-        best = KNOWN_COMBO_EXPANSIONS[key];
+        best = ce.itens;
         bestLen = keyNorm.length;
       }
     }
@@ -1719,13 +1844,11 @@ This typically indicates that your device does not have a healthy Internet conne
       const expansionEntries = matchComboExpansion(part.text);
       if(expansionEntries){
         expansionEntries.forEach(entry=>{
-          const nome = typeof entry === "string" ? entry : entry.nome;
-          const forcedVariante = typeof entry === "string" ? null : entry.variante;
-          const combinado = state.combinados.find(c=>c.nome === nome);
+          const combinado = state.combinados.find(c=>c.nome === entry.nome);
           if(!combinado) return;
           results.push({
             combinado,
-            variante: forcedVariante || (combinado.variantes.length ? combinado.variantes[0] : null),
+            variante: entry.variante || (combinado.variantes.length ? combinado.variantes[0] : null),
             quantity: Math.max(1, part.quantity) * Math.max(1, job.quantity || 1)
           });
         });
@@ -1751,17 +1874,13 @@ This typically indicates that your device does not have a healthy Internet conne
   // (pode acontecer se a aba travar esperando a caixa de impressão nativa).
   const saiposHandledIds = new Set();
 
-  // Combinados que não devem gerar etiqueta sozinhos na impressão automática
-  // da Saipos (reconhecidos normalmente, mas ignorados na hora de imprimir).
-  const SAIPOS_NO_AUTOPRINT = ["YAKISOBA"];
-
   async function handleSaiposJob(doc){
     if(saiposHandledIds.has(doc.id)) return;
     saiposHandledIds.add(doc.id);
 
     const job = doc.data();
     const allProducts = matchAllProductsFromJob(job);
-    const products = allProducts.filter(p=>!SAIPOS_NO_AUTOPRINT.includes(p.combinado.nome));
+    const products = allProducts.filter(p=>!state.semAutoprint.includes(p.combinado.nome));
 
     // Marca como processado ANTES de imprimir — garante que nunca imprime
     // duas vezes o mesmo aviso, mesmo que a impressão em si falhe.

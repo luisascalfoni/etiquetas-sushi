@@ -1588,6 +1588,19 @@ This typically indicates that your device does not have a healthy Internet conne
     updateSaiposAutoStatus("Desligado.");
   }
 
+  // Processa um pedido da Saipos por vez. handleSaiposJob mexe nos mesmos
+  // campos globais da tela "Nova Etiqueta" (combinado, tamanho, sushiman,
+  // quantidade) usados pra imprimir — se dois pedidos chegassem juntos e
+  // rodassem ao mesmo tempo, um ia sobrescrever o campo que o outro estava
+  // lendo bem na hora de imprimir, saindo etiqueta em branco ou trocada.
+  // Essa fila garante que um termina antes do próximo começar.
+  let saiposQueue = Promise.resolve();
+  function enqueueSaiposJob(doc){
+    saiposQueue = saiposQueue
+      .then(()=>handleSaiposJob(doc))
+      .catch(e=>console.error("Erro processando fila de pedidos da Saipos:", e));
+  }
+
   function startSaiposListener(){
     if(saiposUnsub) return;
     let db;
@@ -1604,7 +1617,7 @@ This typically indicates that your device does not have a healthy Internet conne
       .onSnapshot((snap)=>{
         snap.docChanges().forEach((change)=>{
           if(change.type === "added"){
-            handleSaiposJob(change.doc);
+            enqueueSaiposJob(change.doc);
           }
         });
       }, (err)=>{

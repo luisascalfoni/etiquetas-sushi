@@ -1714,24 +1714,31 @@ This typically indicates that your device does not have a healthy Internet conne
   // (pode acontecer se a aba travar esperando a caixa de impressão nativa).
   const saiposHandledIds = new Set();
 
+  // Combinados que não devem gerar etiqueta sozinhos na impressão automática
+  // da Saipos (reconhecidos normalmente, mas ignorados na hora de imprimir).
+  const SAIPOS_NO_AUTOPRINT = ["YAKISOBA"];
+
   async function handleSaiposJob(doc){
     if(saiposHandledIds.has(doc.id)) return;
     saiposHandledIds.add(doc.id);
 
     const job = doc.data();
-    const products = matchAllProductsFromJob(job);
+    const allProducts = matchAllProductsFromJob(job);
+    const products = allProducts.filter(p=>!SAIPOS_NO_AUTOPRINT.includes(p.combinado.nome));
 
     // Marca como processado ANTES de imprimir — garante que nunca imprime
     // duas vezes o mesmo aviso, mesmo que a impressão em si falhe.
     await doc.ref.update({
       processed: true,
       processedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      matched: products.length > 0,
-      matchedCombinado: products.map(p=>p.combinado.nome).join(", ") || null
+      matched: allProducts.length > 0,
+      matchedCombinado: allProducts.map(p=>p.combinado.nome).join(", ") || null
     }).catch(e=>console.error("Erro marcando pedido como processado:", e));
 
     if(products.length === 0){
-      printConfirm(`Saipos: não reconheci "${job.desc}" — imprima manualmente.`, true);
+      if(allProducts.length === 0){
+        printConfirm(`Saipos: não reconheci "${job.desc}" — imprima manualmente.`, true);
+      }
       return;
     }
 

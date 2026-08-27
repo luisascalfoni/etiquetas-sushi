@@ -774,6 +774,7 @@ This typically indicates that your device does not have a healthy Internet conne
       delete c.pecas;
       delete c.tamanhos;
       if(!Array.isArray(c.apelidos)) c.apelidos = [];
+      applyKnownApelidos(c);
     });
     return list;
   }
@@ -1525,8 +1526,18 @@ This typically indicates that your device does not have a healthy Internet conne
         return true;
       }catch(err){
         console.error(err);
+        if(source === "saipos"){
+          printConfirm("Saipos: falha ao enviar para a impressora Bluetooth — imprima manualmente.", true);
+          return "printer";
+        }
         printConfirm("Falha ao enviar para a impressora — tentando impressão normal.", true);
       }
+    } else if(source === "saipos"){
+      // Sem impressora conectada, o diálogo nativo do navegador (window.print)
+      // exige alguém clicando "Imprimir" na hora — não faz sentido pra
+      // impressão automática sem ninguém acompanhando, então só avisa.
+      printConfirm("Saipos: impressora Bluetooth não conectada — imprima manualmente.", true);
+      return "printer";
     }
 
     preparePrintCopies(document.getElementById("label").innerHTML, qtd);
@@ -1972,10 +1983,45 @@ This typically indicates that your device does not have a healthy Internet conne
     var out = "";
     for(var i=0; i<str.length; i++){
       var ch = str[i];
-      out += ACCENT_MAP[ch] || ch;
+      var lower = ch.toLowerCase();
+      var mapped = ACCENT_MAP[lower];
+      if(mapped){
+        out += (ch === lower) ? mapped : mapped.toUpperCase();
+      } else {
+        out += ch;
+      }
     }
     return out;
   }
+  // Nomes que a Saipos escreve diferente do combinado cadastrado (grafia
+  // diferente, palavra a mais no meio) — vistos em pedidos reais que não
+  // batiam. Aplicados automaticamente como apelido extra, sem precisar
+  // editar a planilha.
+  var KNOWN_APELIDOS = {
+    "HOT PHILADELPHIA": ["HOT PHILADÉLFIA"],
+    "HOSSOMAKI DE SALMÃO": ["HOSOMAKI DE SALMÃO"],
+    "TEMAKI CRU": ["TEMAKI DE SALMÃO CRU", "TEMAKI DE CAMARÃO CRU"],
+    "TEMAKI EM DOBRO CRU": ["TEMAKI EM DOBRO DE SALMÃO CRU", "TEMAKI EM DOBRO DE CAMARÃO CRU"],
+    "MONTE SEU MIX": ["MONTE SEU HOT MIX"],
+    "URAMAKI PHILADELPHIA": ["URAMAKI SALMÃO PHILADÉLFIA", "URAMAKI CAMARÃO PHILADÉLFIA"],
+    "NIGUIRI - 2 PEÇAS": ["NIGUIRI DE SKIN - 2 PEÇAS", "NIGUIRI DE SALMÃO - 2 PEÇAS"],
+    "NIGUIRI - 4 PEÇAS": ["NIGUIRI DE SKIN - 4 PEÇAS", "NIGUIRI DE SALMÃO - 4 PEÇAS"],
+    "MIX DE JOE": ["DUO JOE"]
+  };
+  function applyKnownApelidos(c){
+    const extra = KNOWN_APELIDOS[c.nome];
+    if(!extra) return;
+    if(!Array.isArray(c.apelidos)) c.apelidos = [];
+    const have = new Set(c.apelidos.map(a=>a.toUpperCase()));
+    extra.forEach(a=>{
+      const au = a.toUpperCase();
+      if(!have.has(au)){
+        c.apelidos.push(au);
+        have.add(au);
+      }
+    });
+  }
+
   function normalizeHeader(h){
     return stripAccents(String(h).trim().toLowerCase())
       .replace(/[^a-z0-9]/g, "");

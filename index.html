@@ -1644,6 +1644,26 @@ This typically indicates that your device does not have a healthy Internet conne
       .filter(p=>p.text.length > 0);
   }
 
+  // Combos vendidos como um item só na Saipos, mas que imprimem mais de uma
+  // etiqueta (produtos fixos, sem depender do texto do pedido pra achar cada
+  // um). Chave = texto que aparece na Saipos, valor = nomes dos combinados.
+  var KNOWN_COMBO_EXPANSIONS = {
+    "COMBO I LOVE HOT": ["SUPREME HOT", "MIX NUTELLA"]
+  };
+  function matchComboExpansion(text){
+    const norm = stripAccents(String(text || "").toUpperCase());
+    let best = null;
+    let bestLen = 0;
+    for(const key in KNOWN_COMBO_EXPANSIONS){
+      const keyNorm = stripAccents(key.toUpperCase());
+      if(keyNorm && norm.includes(keyNorm) && keyNorm.length > bestLen){
+        best = KNOWN_COMBO_EXPANSIONS[key];
+        bestLen = keyNorm.length;
+      }
+    }
+    return best;
+  }
+
   // Acha o combinado cujo nome (ou apelido cadastrado na Saipos) aparece no
   // texto. Fica com o nome/apelido mais longo que bater, pra reduzir engano.
   function matchCombinadoInText(text){
@@ -1694,6 +1714,19 @@ This typically indicates that your device does not have a healthy Internet conne
     const parts = splitSaiposDesc(job.desc);
     const results = [];
     for(const part of parts){
+      const expansionNames = matchComboExpansion(part.text);
+      if(expansionNames){
+        expansionNames.forEach(nome=>{
+          const combinado = state.combinados.find(c=>c.nome === nome);
+          if(!combinado) return;
+          results.push({
+            combinado,
+            variante: combinado.variantes.length ? combinado.variantes[0] : null,
+            quantity: Math.max(1, part.quantity) * Math.max(1, job.quantity || 1)
+          });
+        });
+        continue;
+      }
       const combinado = matchCombinadoInText(part.text);
       if(combinado){
         const varianteMatch = combinado.variantes.length

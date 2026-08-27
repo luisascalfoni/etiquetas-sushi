@@ -1646,9 +1646,11 @@ This typically indicates that your device does not have a healthy Internet conne
 
   // Combos vendidos como um item só na Saipos, mas que imprimem mais de uma
   // etiqueta (produtos fixos, sem depender do texto do pedido pra achar cada
-  // um). Chave = texto que aparece na Saipos, valor = nomes dos combinados.
+  // um). Chave = texto que aparece na Saipos, valor = nomes dos combinados
+  // (ou {nome, variante} quando precisa forçar um sabor específico).
   var KNOWN_COMBO_EXPANSIONS = {
-    "COMBO I LOVE HOT": ["SUPREME HOT", "MIX NUTELLA"]
+    "COMBO I LOVE HOT": ["SUPREME HOT", "MIX NUTELLA"],
+    "COMBO SAKURA LOVE": ["MAGNIFIC SALMON", "MIX NUTELLA", {nome:"CROQUETES", variante:"SALMÃO"}]
   };
   function matchComboExpansion(text){
     const norm = stripAccents(String(text || "").toUpperCase());
@@ -1714,14 +1716,16 @@ This typically indicates that your device does not have a healthy Internet conne
     const parts = splitSaiposDesc(job.desc);
     const results = [];
     for(const part of parts){
-      const expansionNames = matchComboExpansion(part.text);
-      if(expansionNames){
-        expansionNames.forEach(nome=>{
+      const expansionEntries = matchComboExpansion(part.text);
+      if(expansionEntries){
+        expansionEntries.forEach(entry=>{
+          const nome = typeof entry === "string" ? entry : entry.nome;
+          const forcedVariante = typeof entry === "string" ? null : entry.variante;
           const combinado = state.combinados.find(c=>c.nome === nome);
           if(!combinado) return;
           results.push({
             combinado,
-            variante: combinado.variantes.length ? combinado.variantes[0] : null,
+            variante: forcedVariante || (combinado.variantes.length ? combinado.variantes[0] : null),
             quantity: Math.max(1, part.quantity) * Math.max(1, job.quantity || 1)
           });
         });

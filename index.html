@@ -628,12 +628,12 @@
 
     <div class="card">
       <h2>Impressão automática (Saipos)</h2>
-      <p class="hint" style="margin-top:0;">Quando um item do pedido fica "pronto" no kanban da Saipos, o sistema tenta reconhecer o combinado e imprimir sozinho — a impressora Bluetooth precisa estar conectada (aba acima). Como a Saipos não informa qual sushiman preparou, é usado o "sushiman padrão" abaixo.</p>
+      <p class="hint" style="margin-top:0;">Quando um item do pedido fica "pronto" no kanban da Saipos, o sistema tenta reconhecer o combinado e imprimir sozinho — a impressora Bluetooth precisa estar conectada (aba acima). O sushiman é identificado automaticamente pelo nome de quem deu baixa no pedido; o "sushiman de reserva" abaixo só é usado quando esse nome não é reconhecido.</p>
       <label style="display:flex; align-items:center; gap:8px;">
         <input type="checkbox" id="cfg-saipos-auto" style="width:auto;">
         <span style="font-weight:600; color:var(--text);">Ativar impressão automática pela Saipos</span>
       </label>
-      <label for="cfg-saipos-sushiman" style="margin-top:14px;">Sushiman padrão (usado na impressão automática)</label>
+      <label for="cfg-saipos-sushiman" style="margin-top:14px;">Sushiman de reserva (opcional — usado só quando o nome não é reconhecido)</label>
       <select id="cfg-saipos-sushiman"></select>
       <p class="hint" id="saipos-auto-status">Desligado.</p>
     </div>
@@ -2227,9 +2227,7 @@ This typically indicates that your device does not have a healthy Internet conne
   document.getElementById("cfg-saipos-auto").addEventListener("change", ()=>{
     const checked = document.getElementById("cfg-saipos-auto").checked;
     if(checked && !state.config.saiposSushimanId){
-      toast("Escolha um sushiman padrão antes de ativar.");
-      document.getElementById("cfg-saipos-auto").checked = false;
-      return;
+      toast("Ativado — sem sushiman de reserva escolhido, itens não reconhecidos ficarão sem sushiman selecionado.");
     }
     state.config.saiposAutoEnabled = checked;
     save();

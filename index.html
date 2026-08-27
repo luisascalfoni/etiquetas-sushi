@@ -1606,9 +1606,13 @@ This typically indicates that your device does not have a healthy Internet conne
     await printTask.printInit();
     await printTask.printPage(encoded, qtd);
     // A partir daqui o comando já foi enviado pra impressora — o resto (esperar
-    // terminar de imprimir de verdade e fechar a tarefa) continua em segundo
-    // plano, sem travar a confirmação na tela.
-    (async ()=>{
+    // terminar de imprimir de verdade e fechar a tarefa) roda por conta, sem
+    // travar a confirmação na tela do print manual. Quem chamou também recebe
+    // essa promessa (finished) pra poder esperar a impressora terminar de
+    // verdade antes de mandar a próxima etiqueta — evita começar um novo
+    // printTask em cima do anterior ainda não fechado, que trava a impressora
+    // depois de algumas etiquetas seguidas (usado pela fila da Saipos).
+    const finished = (async ()=>{
       try{
         await printTask.waitForPageFinished();
         await printTask.waitForFinished();
@@ -1618,6 +1622,7 @@ This typically indicates that your device does not have a healthy Internet conne
         await printTask.printEnd();
       }
     })();
+    return { finished };
   }
 
   // Lógica de impressão compartilhada entre o botão manual e a impressão
@@ -1651,8 +1656,16 @@ This typically indicates that your device does not have a healthy Internet conne
     const targetClient = resolvePrinterClientForSushiman(selSushiman.value);
     if(targetClient){
       try{
-        await printViaBluetooth(targetClient, qtd);
+        const printResult = await printViaBluetooth(targetClient, qtd);
         printConfirm(qtd > 1 ? `${qtd} etiquetas enviadas com sucesso!` : "Etiqueta enviada com sucesso!");
+        // Na automação da Saipos espera a impressora terminar de verdade
+        // antes de liberar a próxima etiqueta da fila — evita começar um
+        // novo comando em cima de um anterior ainda não fechado, que trava
+        // a impressora depois de algumas seguidas. No print manual não
+        // espera, pra manter a confirmação rápida na tela.
+        if(source === "saipos" && printResult && printResult.finished){
+          await printResult.finished;
+        }
         return true;
       }catch(err){
         console.error(err);

@@ -424,8 +424,7 @@
   <nav>
     <button data-tab="nova" class="active">Nova Etiqueta</button>
     <button data-tab="historico">Histórico</button>
-    <button data-tab="combinados">Combinados</button>
-    <button data-tab="sushimans">Sushimans</button>
+    <button data-tab="cadastros">Cadastros</button>
     <button data-tab="automacao">Automação</button>
     <button data-tab="config">Config</button>
   </nav>
@@ -507,13 +506,14 @@
     <div id="hist-list"></div>
   </section>
 
-  <!-- ===================== TAB: COMBINADOS ===================== -->
-  <section id="tab-combinados" style="display:none;">
+  <!-- ===================== TAB: CADASTROS ===================== -->
+  <section id="tab-cadastros" style="display:none;">
     <div class="card">
-      <h2>Lista fixa de combinados</h2>
+      <h2>Itens das etiquetas</h2>
+      <p class="hint">Cadastre aqui os combinados e outros itens que deseja selecionar ao imprimir uma etiqueta.</p>
       <div id="combinados-list"></div>
       <div class="add-form">
-        <label>Nome do combinado</label>
+        <label for="cb-nome">Nome do item</label>
         <input type="text" id="cb-nome" placeholder="Ex: SAORI">
         <div class="row2">
           <div>
@@ -526,7 +526,7 @@
           </div>
         </div>
         <p class="hint" style="margin-top:0;">Mais de uma opção? Separe com ; — números viram tamanho (ex: <b>31;62</b>), texto vira sabor (ex: <b>Salmão;Camarão</b>). Na hora de imprimir, você escolhe a opção. Deixe em branco se não houver variação.</p>
-        <button class="btn btn-primary" id="cb-add">+ Adicionar combinado</button>
+        <button class="btn btn-primary" id="cb-add">+ Adicionar item</button>
       </div>
     </div>
 
@@ -537,17 +537,13 @@
       <input type="file" id="cb-import-file" accept=".xlsx,.xls,.csv">
       <button class="btn btn-secondary" id="cb-download-template" style="margin-top:12px;">⬇️ Baixar modelo de planilha</button>
     </div>
-  </section>
-
-  <!-- ===================== TAB: SUSHIMANS ===================== -->
-  <section id="tab-sushimans" style="display:none;">
     <div class="card">
-      <h2>Sushimans</h2>
+      <h2>Responsáveis pelas etiquetas</h2>
       <div id="sushimans-list"></div>
       <div class="add-form">
-        <label>Nome do sushiman</label>
+        <label for="sm-nome">Nome do responsável</label>
         <input type="text" id="sm-nome" placeholder="Ex: João">
-        <button class="btn btn-primary" id="sm-add">+ Adicionar sushiman</button>
+        <button class="btn btn-primary" id="sm-add">+ Adicionar responsável</button>
       </div>
     </div>
   </section>
@@ -640,7 +636,7 @@
 
     <div class="card">
       <h2>Impressoras Bluetooth (NIIMBOT)</h2>
-      <p class="hint" style="margin-top:0;">Conecte cada impressora uma vez para imprimir sem abrir a caixa de diálogo do Android. Precisa conectar de novo toda vez que abrir o app (regra de segurança do navegador) — mas enquanto ficar conectada, cada etiqueta imprime direto. Com mais de uma impressora cadastrada, você escolhe na aba Sushimans qual impressora cada sushiman usa.</p>
+      <p class="hint" style="margin-top:0;">Conecte cada impressora uma vez para imprimir sem abrir a caixa de diálogo do Android. Precisa conectar de novo toda vez que abrir o app (regra de segurança do navegador) — mas enquanto ficar conectada, cada etiqueta imprime direto. Com mais de uma impressora cadastrada, você escolhe na aba Cadastros qual impressora cada responsável usa.</p>
       <div id="printers-list"></div>
       <button class="btn btn-primary" id="printer-add" style="margin-top:10px;">+ Adicionar impressora</button>
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
@@ -1015,7 +1011,7 @@ This typically indicates that your device does not have a healthy Internet conne
   });
 
   // ---------- TABS ----------
-  const tabs = ["nova","historico","combinados","sushimans","automacao","config"];
+  const tabs = ["nova","historico","cadastros","automacao","config"];
   document.querySelectorAll("nav button").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
@@ -1024,8 +1020,10 @@ This typically indicates that your device does not have a healthy Internet conne
         document.getElementById("tab-"+t).style.display = (t===btn.dataset.tab) ? "" : "none";
       });
       if(btn.dataset.tab === "historico") renderHistorico();
-      if(btn.dataset.tab === "combinados") renderCombinados();
-      if(btn.dataset.tab === "sushimans") renderSushimans();
+      if(btn.dataset.tab === "cadastros"){
+        renderCombinados();
+        renderSushimans();
+      }
       if(btn.dataset.tab === "automacao") renderAutomacao();
       if(btn.dataset.tab === "config") fillConfigForm();
       if(btn.dataset.tab === "nova") refreshNovaSelections();
